@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 )
 
@@ -52,14 +53,16 @@ func run() error {
 	}
 	flag.Parse()
 
-	tasks, err := getTasks()
 	command := os.Args[0]
 	switch command {
 	case "add":
-    if err := addTask(tasks); err != nil {
-      return err
-    }
+		if err := addTask(); err != nil {
+			return err
+		}
 	case "complete":
+		if err := completeTask(); err != nil {
+			return err
+		}
 	case "delete":
 	case "list":
 	}
@@ -67,47 +70,9 @@ func run() error {
 	return nil
 }
 
-func addTask(tasks []task) error {
-	if len(os.Args[1:]) > 1 {
-		return &taskError{"tasks: too many task. add one task at a time"}
-	}
-
-  if len(os.Args[1:]) <= 1 {
-    return &taskError{`tasks: please specify the task for "add" command`}
-  }
-
-	var latestTaskId int
-	latestTaskId = 1
-	if len(tasks) != 0 {
-		latestTaskId = tasks[len(tasks)-1].Id + 1
-	}
-
-	newTask := task{
-		latestTaskId,
-		os.Args[1],
-		time.Unix(time.Now().Unix(), 0).Local(),
-		false,
-	}
-
-	tasks = append(tasks, newTask)
-
-	f, err := os.OpenFile("./tasks.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	encoder := json.NewEncoder(f)
-	err = encoder.Encode(tasks)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 func validateArgs(args, commands []string) ([]string, error) {
 	if len(args) < 2 {
-		return nil, &taskError{fmt.Sprintf("tasks: not enough arguments\n")}
+		return nil, &taskError{"tasks: not enough arguments\n"}
 	}
 
 	arg := args[1]
@@ -131,6 +96,94 @@ func validateArgs(args, commands []string) ([]string, error) {
 	}
 
 	return args[1:], nil
+}
+
+func parseCmdArg(cmd string, args []string) (string, error) {
+	if len(args[1:]) > 1 {
+		return "", &taskError{"tasks: too many task. add one task at a time"}
+	}
+
+	if len(args[1:]) < 1 {
+		return "", &taskError{fmt.Sprintf(`tasks: argument missing for "%v" command`, cmd)}
+	}
+
+	return args[1], nil
+}
+
+func addTask() error {
+	arg, err := parseCmdArg("add", os.Args)
+	if err != nil {
+		return err
+	}
+
+	tasks, err := getTasks()
+	if err != nil {
+		return err
+	}
+
+	var latestTaskId int
+	latestTaskId = 1
+	if len(tasks) != 0 {
+		latestTaskId = tasks[len(tasks)-1].Id + 1
+	}
+
+	newTask := task{
+		latestTaskId,
+		arg,
+		time.Unix(time.Now().Unix(), 0).Local(),
+		false,
+	}
+
+	tasks = append(tasks, newTask)
+	err = storeTasks(tasks)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func completeTask() error {
+	id, err := parseCmdArg("complete", os.Args)
+	if err != nil {
+		return err
+	}
+
+	intId, err := strconv.Atoi(id)
+	if err != nil {
+		return err
+	}
+
+	tasks, err := getTasks()
+	if err != nil {
+		return err
+	}
+
+	for index, t := range tasks {
+		if intId == t.Id {
+			tasks[index].Done = true
+		}
+	}
+
+	err = storeTasks(tasks)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func storeTasks(tasks []task) error {
+	f, err := os.OpenFile("./tasks.json", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	encoder := json.NewEncoder(f)
+	err = encoder.Encode(tasks)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func getTasks() ([]task, error) {
