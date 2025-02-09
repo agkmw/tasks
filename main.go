@@ -36,37 +36,52 @@ func (t task) String() string {
     }`, t.Id, t.Task, t.CreatedAt, t.Done)
 }
 
-func main() {
-	if err := run(); err != nil {
-		log.Fatal(err)
-	}
+type Color string
+
+const (
+	ColorRed   Color = "\u001b[31m"
+	ColorGreen       = "\u001b[32m"
+	ColorReset       = "\u001b[0m"
+)
+
+func logError(err error) {
+	log.Fatal(string(ColorRed), err, string(ColorReset))
 }
+
+func logSuccess(message string) {
+	fmt.Println(string(ColorGreen), message, string(ColorReset))
+}
+
 
 func run() error {
 	commands := []string{"add", "list", "complete", "delete"}
-	all := flag.Bool("all", true, "Display all tasks")
+	all := flag.Bool("all", false, "Display all tasks")
 
 	var err error
 	os.Args, err = validateArgs(os.Args, commands)
 	if err != nil {
 		return err
 	}
+
 	flag.Parse()
 
 	command := os.Args[0]
 	switch command {
 	case "add":
-		if err := addTask(); err != nil {
+		if err := addHandler(); err != nil {
 			return err
 		}
 	case "complete":
-		if err := completeTask(); err != nil {
+		if err := completeHandler(); err != nil {
 			return err
 		}
 	case "delete":
+		if err := deleteHandler(*all); err != nil {
+			return err
+		}
 	case "list":
 	}
-	fmt.Println(*all)
+
 	return nil
 }
 
@@ -91,7 +106,7 @@ func validateArgs(args, commands []string) ([]string, error) {
 		return nil, &taskError{fmt.Sprintf(`tasks: expected 1 command, got %v\n`, commandCounts)}
 	}
 
-	if arg != "list" && slices.Contains(args, "--all") {
+	if arg != "list" && arg != "delete" && slices.Contains(args, "--all") {
 		return nil, &taskError{fmt.Sprintf(`tasks: "%v" command does not accepts any flags\n`, arg)}
 	}
 
@@ -100,7 +115,7 @@ func validateArgs(args, commands []string) ([]string, error) {
 
 func parseCmdArg(cmd string, args []string) (string, error) {
 	if len(args[1:]) > 1 {
-		return "", &taskError{"tasks: too many task. add one task at a time"}
+		return "", &taskError{fmt.Sprintf("tasks: too many arguments for \"%v\" command", cmd)}
 	}
 
 	if len(args[1:]) < 1 {
@@ -110,7 +125,7 @@ func parseCmdArg(cmd string, args []string) (string, error) {
 	return args[1], nil
 }
 
-func addTask() error {
+func addHandler() error {
 	arg, err := parseCmdArg("add", os.Args)
 	if err != nil {
 		return err
@@ -139,10 +154,12 @@ func addTask() error {
 	if err != nil {
 		return err
 	}
+
+	logSuccess(fmt.Sprintf("added \"%v\"\n", newTask.Task))
 	return nil
 }
 
-func completeTask() error {
+func completeHandler() error {
 	id, err := parseCmdArg("complete", os.Args)
 	if err != nil {
 		return err
@@ -158,16 +175,81 @@ func completeTask() error {
 		return err
 	}
 
-	for index, t := range tasks {
-		if intId == t.Id {
-			tasks[index].Done = true
-		}
-	}
+	index := slices.IndexFunc(tasks, func(t task) bool {
+		return t.Id == intId
+	})
+  if index == -1 {
+    return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
+  }
+
+  taskToComplete := &tasks[index]
+  taskToComplete.Done = true
 
 	err = storeTasks(tasks)
 	if err != nil {
 		return err
 	}
+
+	logSuccess(fmt.Sprintf("completed \"%v\"\n", taskToComplete.Task))
+	return nil
+}
+
+func deleteHandler(all bool) error {
+	if all {
+		if err := deleteAllTasks(); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if err := deleteTask(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func deleteAllTasks() error {
+	err := storeTasks([]task{})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func deleteTask() error {
+	id, err := parseCmdArg("complete", os.Args)
+	if err != nil {
+		return err
+	}
+
+	intId, err := strconv.Atoi(id)
+	if err != nil {
+		return &taskError{"tasks: unvalid task id for \"delete\" command"}
+	}
+
+	tasks, err := getTasks()
+	if err != nil {
+		return err
+	}
+
+	index := slices.IndexFunc(tasks, func(t task) bool {
+		return t.Id == intId
+	})
+  if index == -1 {
+    return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
+  }
+	taskToDelete := tasks[index]
+
+	tasks = slices.DeleteFunc(tasks, func(t task) bool {
+		return t.Id == intId
+	})
+
+	err = storeTasks(tasks)
+	if err != nil {
+		return err
+	}
+
+	logSuccess(fmt.Sprintf("deleted \"%v\"\n", taskToDelete.Task))
 	return nil
 }
 
@@ -183,7 +265,7 @@ func storeTasks(tasks []task) error {
 	if err != nil {
 		return err
 	}
-	return nil
+	return f.Close()
 }
 
 func getTasks() ([]task, error) {
@@ -200,4 +282,10 @@ func getTasks() ([]task, error) {
 	}
 
 	return tasks, nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		logError(err)
+	}
 }
