@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"text/tabwriter"
 	"time"
 )
 
@@ -65,6 +66,7 @@ func run() error {
 
 	flag.Parse()
 
+  fmt.Println(time.Unix(time.Now().Unix(), 0).UTC().Location())
 	command := os.Args[0]
 	switch command {
 	case "add":
@@ -80,6 +82,9 @@ func run() error {
 			return err
 		}
 	case "list":
+    if err := listHandler(*all); err != nil {
+      return err
+    }
 	}
 
 	return nil
@@ -251,6 +256,43 @@ func deleteTask() error {
 
 	logSuccess(fmt.Sprintf("deleted \"%v\"\n", taskToDelete.Task))
 	return nil
+}
+
+func listHandler(all bool) error {
+  tasks, err := getTasks()
+  if err != nil {
+    return err
+  }
+
+  tasksToDisplay := tasks
+  if !all {
+    tasksToDisplay = []task {}
+    for _, t := range tasks {
+      if !t.Done {
+        tasksToDisplay = append(tasksToDisplay, t)
+      }
+    }
+  }
+
+  w := tabwriter.NewWriter(os.Stdout, 0, 0, 7, ' ', 0)
+  _, err = fmt.Fprintln(w, "Id\tTask\tCreated\tDone")
+  if err != nil {
+    return err
+  }
+
+  for _, t := range tasksToDisplay {
+    taskOutput := fmt.Sprintf("%v\t%v\t%v\t%v", t.Id, t.Task, t.CreatedAt, t.Done)
+    _, err := fmt.Fprintln(w, taskOutput)
+    if err != nil {
+      return err
+    }
+  }
+
+  err = w.Flush()
+  if err != nil {
+    return err
+  }
+  return nil
 }
 
 func storeTasks(tasks []task) error {
