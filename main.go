@@ -38,6 +38,7 @@ func (t task) String() string {
 }
 
 type Color string
+type Seconds float64
 
 const (
 	ColorRed   Color = "\u001b[31m"
@@ -53,6 +54,70 @@ func logSuccess(message string) {
 	fmt.Println(string(ColorGreen), message, string(ColorReset))
 }
 
+func GetHumanReadableTime(pastTime time.Time) string {
+	currentTime := time.Now()
+	elapsedTimeInSeconds := currentTime.Sub(pastTime).Seconds()
+
+	oneDay := 24 * time.Hour
+	timeUnits := []map[string]map[string]float64{
+		{
+			"minutes": {
+				"threshold":        time.Duration(1 * time.Hour).Seconds(),
+				"conversionFactor": time.Duration(1 * time.Minute).Seconds(),
+			},
+		},
+		{
+			"hours": {
+				"threshold":        time.Duration(oneDay).Seconds(),
+				"conversionFactor": time.Duration(1 * time.Hour).Seconds(),
+			},
+		},
+		{
+			"days": {
+				"threshold":        time.Duration(7 * oneDay).Seconds(),
+				"conversionFactor": time.Duration(oneDay).Seconds(),
+			},
+		},
+		{
+			"weeks": {
+				"threshold":        time.Duration(30 * oneDay).Seconds(),
+				"conversionFactor": time.Duration(7 * oneDay).Seconds(),
+			},
+		},
+		{
+			"months": {
+				"threshold":        time.Duration(365 * oneDay).Seconds(),
+				"conversionFactor": time.Duration(30 * oneDay).Seconds(),
+			},
+		},
+		{
+			"years": {
+				"threshold":        time.Duration(10 * 365 * oneDay).Seconds(),
+				"conversionFactor": time.Duration(365 * oneDay).Seconds(),
+			},
+		},
+	}
+
+	if elapsedTimeInSeconds < time.Minute.Seconds() {
+		return "a few seconds ago"
+	}
+
+	for _, timeUnit := range timeUnits {
+		for unit, duration := range timeUnit {
+			if elapsedTimeInSeconds < duration["threshold"] {
+				value := int(elapsedTimeInSeconds / duration["conversionFactor"])
+
+				if value == 1 {
+					unit = unit[:len(unit)-1]
+				}
+
+				return fmt.Sprintf("%d %s ago", value, unit)
+			}
+		}
+	}
+
+	return "a long time ago"
+}
 
 func run() error {
 	commands := []string{"add", "list", "complete", "delete"}
@@ -66,7 +131,6 @@ func run() error {
 
 	flag.Parse()
 
-  fmt.Println(time.Unix(time.Now().Unix(), 0).UTC().Location())
 	command := os.Args[0]
 	switch command {
 	case "add":
@@ -82,9 +146,9 @@ func run() error {
 			return err
 		}
 	case "list":
-    if err := listHandler(*all); err != nil {
-      return err
-    }
+		if err := listHandler(*all); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -183,12 +247,12 @@ func completeHandler() error {
 	index := slices.IndexFunc(tasks, func(t task) bool {
 		return t.Id == intId
 	})
-  if index == -1 {
-    return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
-  }
+	if index == -1 {
+		return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
+	}
 
-  taskToComplete := &tasks[index]
-  taskToComplete.Done = true
+	taskToComplete := &tasks[index]
+	taskToComplete.Done = true
 
 	err = storeTasks(tasks)
 	if err != nil {
@@ -240,9 +304,11 @@ func deleteTask() error {
 	index := slices.IndexFunc(tasks, func(t task) bool {
 		return t.Id == intId
 	})
-  if index == -1 {
-    return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
-  }
+
+	if index == -1 {
+		return &taskError{fmt.Sprintf("tasks: not found task with %v", intId)}
+	}
+
 	taskToDelete := tasks[index]
 
 	tasks = slices.DeleteFunc(tasks, func(t task) bool {
@@ -259,40 +325,42 @@ func deleteTask() error {
 }
 
 func listHandler(all bool) error {
-  tasks, err := getTasks()
-  if err != nil {
-    return err
-  }
+	tasks, err := getTasks()
+	if err != nil {
+		return err
+	}
 
-  tasksToDisplay := tasks
-  if !all {
-    tasksToDisplay = []task {}
-    for _, t := range tasks {
-      if !t.Done {
-        tasksToDisplay = append(tasksToDisplay, t)
-      }
-    }
-  }
+	tasksToDisplay := tasks
+	if !all {
+		tasksToDisplay = []task{}
+		for _, t := range tasks {
+			if !t.Done {
+				tasksToDisplay = append(tasksToDisplay, t)
+			}
+		}
+	}
 
-  w := tabwriter.NewWriter(os.Stdout, 0, 0, 7, ' ', 0)
-  _, err = fmt.Fprintln(w, "Id\tTask\tCreated\tDone")
-  if err != nil {
-    return err
-  }
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 7, ' ', 0)
+	_, err = fmt.Fprintln(w, "Id\tTask\tCreated\tDone")
+	if err != nil {
+		return err
+	}
 
-  for _, t := range tasksToDisplay {
-    taskOutput := fmt.Sprintf("%v\t%v\t%v\t%v", t.Id, t.Task, t.CreatedAt, t.Done)
-    _, err := fmt.Fprintln(w, taskOutput)
-    if err != nil {
-      return err
-    }
-  }
+	for _, t := range tasksToDisplay {
+		taskOutput := fmt.Sprintf("%v\t%v\t%v\t%v",
+			t.Id, t.Task, GetHumanReadableTime(t.CreatedAt), t.Done)
 
-  err = w.Flush()
-  if err != nil {
-    return err
-  }
-  return nil
+		_, err := fmt.Fprintln(w, taskOutput)
+		if err != nil {
+			return err
+		}
+	}
+
+	err = w.Flush()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func storeTasks(tasks []task) error {
